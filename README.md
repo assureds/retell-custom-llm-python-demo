@@ -1,6 +1,6 @@
 # retell-custom-llm-python-demo
 
-This is a sample demo repo to show how to have your own LLM plugged into Retell.
+This is a sample demo repo to show how to have your own LLM plugged into Retell.   
 
 This repo currently uses `OpenAI` endpoint. Feel free to contribute to make
 this demo more realistic.
