@@ -37,6 +37,9 @@ class LlmClient:
         # Build metadata context
         metadata_context = ""
         if request.retell_llm_dynamic_variables:
+            print(f"DEBUG: Full metadata received: {request.retell_llm_dynamic_variables}")  # ADD THIS
+            print(f"DEBUG: Metadata keys: {request.retell_llm_dynamic_variables.keys()}")  # ADD THIS
+            
             metadata_context = "\n## Available Provider Data:\n"
             variables = request.retell_llm_dynamic_variables
             metadata_context += f"- Provider/Organization Name: {variables.get('provider_name', 'Not provided')}\n"
@@ -51,6 +54,8 @@ class LlmClient:
                 metadata_context += f"- This is an EXISTING STATE scenario. Use the TAX ID: {variables.get('tax_id')} when asked for verification.\n"
             else:
                 metadata_context += f"- This is a NEW STATE EXPANSION scenario. Use the NPI: {variables.get('npi_number')} when asked for verification.\n"
+        else:
+            print("DEBUG: NO metadata received!")  # ADD THIS
 
         # Anthropic uses a system parameter instead of a system role in messages
         system_prompt = f'''##Objective
