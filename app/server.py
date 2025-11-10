@@ -102,9 +102,9 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
             ):
                 response_id = request_json["response_id"]
                 metadata = request_json.get("retell_llm_dynamic_variables")
-print(f"DEBUG WEBSOCKET: Got metadata - {metadata}")
-if not metadata:
-    print(f"DEBUG WEBSOCKET: WARNING - No metadata received!")
+                print(f"DEBUG WEBSOCKET: Got metadata - {metadata}")
+                if not metadata:
+                    print(f"DEBUG WEBSOCKET: WARNING - No metadata received!")
                 
                 request = ResponseRequiredRequest(
                     interaction_type=interaction_type,
