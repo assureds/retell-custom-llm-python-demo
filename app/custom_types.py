@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Literal, Union
+from typing import Any, List, Optional, Literal, Union, Dict
 from pydantic import BaseModel
 from typing import Literal, Dict, Optional
 
@@ -28,6 +28,7 @@ class ResponseRequiredRequest(BaseModel):
     interaction_type: Literal["reminder_required", "response_required"]
     response_id: int
     transcript: List[Utterance]
+    retell_llm_dynamic_variables: Optional[Dict[str, Any]] = None  # ADD THIS
 
 
 CustomLlmRequest = Union[
