@@ -1,6 +1,6 @@
 from anthropic import AsyncAnthropic
 import os
-from typing import List
+from typing import List, Optional, Dict, Any
 from .custom_types import (
     ResponseRequiredRequest,
     ResponseResponse,
@@ -8,8 +8,6 @@ from .custom_types import (
 )
 
 begin_sentence = "Hi, I'm calling on behalf of a healthcare organization to check your provider panel status. How can I proceed with the verification?"
-agent_prompt = "Task: You are an intelligent AI voice agent calling a health insurance company to verify provider panel status. Your responsibilities are:\n\n1. Navigate IVR systems intelligently by determining which digits to press based on menu options you hear.\n2. Speak professionally and clearly when connected to a human representative.\n3. Provide the correct identifier (Tax ID for existing state scenarios, NPI for new state expansion).\n4. Answer verification questions using data provided in your context.\n5. Determine and record the panel status ('OPEN' or 'CLOSED').\n6. Request a reference number for the call at the end.\n7. End the call professionally once all information is collected.\n\nKey Questions You Must Be Prepared to Answer:\n1. What is the provider or group name?\n2. What is the provider's or group's NPI number?\n3. What is the Tax ID (TIN) associated with the provider or group?\n4. What is the provider's specialty and type?\n5. What is the provider's practice address or ZIP code?\n6. Is the inquiry for an individual provider or a group practice?\n7. Which line of business or network are you inquiring about?\n8. Does the provider or group currently have an active or pending contract with the plan?\n9. What is the panel status you're looking for?\n10. Is the status the same across all service locations?\n11. What is the SSN or DOB of the provider (if required)?\n12. Reference number for this call or inquiry.\n\nConversational Style: Communicate professionally and concisely. Keep responses brief and direct, ideally under 15 words per response. Be courteous and clear.\n\nPersonality: Your approach should be professional, patient, and efficient. Listen actively to the representative's responses. Maintain a neutral, helpful tone throughout the conversation."
-
 
 class LlmClient:
     def __init__(self):
@@ -36,9 +34,29 @@ class LlmClient:
         return messages
 
     def prepare_prompt(self, request: ResponseRequiredRequest):
+        # Build metadata context
+        metadata_context = ""
+        if request.retell_llm_dynamic_variables:
+            metadata_context = "\n## Available Provider Data:\n"
+            variables = request.retell_llm_dynamic_variables
+            metadata_context += f"- Provider/Organization Name: {variables.get('provider_name', 'Not provided')}\n"
+            metadata_context += f"- NPI Number: {variables.get('npi_number', 'Not provided')}\n"
+            metadata_context += f"- Tax ID: {variables.get('tax_id', 'Not provided')}\n"
+            metadata_context += f"- Provider Specialty: {variables.get('specialty', 'Not provided')}\n"
+            metadata_context += f"- Line of Business: {variables.get('line_of_business', 'Not provided')}\n"
+            metadata_context += f"- Scenario Type: {variables.get('scenario_type', 'Not provided')}\n"
+            metadata_context += f"- Payer: {variables.get('payer', 'Not provided')}\n"
+            metadata_context += f"\n## Use Correct Identifier:\n"
+            if variables.get('scenario_type') == 'Existing State':
+                metadata_context += f"- This is an EXISTING STATE scenario. Use the TAX ID: {variables.get('tax_id')} when asked for verification.\n"
+            else:
+                metadata_context += f"- This is a NEW STATE EXPANSION scenario. Use the NPI: {variables.get('npi_number')} when asked for verification.\n"
+
         # Anthropic uses a system parameter instead of a system role in messages
-        system_prompt = '''##Objective
-You are a voice AI agent engaging in a human-like voice conversation with the user. You will respond based on your given instruction and the provided transcript and be as human-like as possible
+        system_prompt = f'''##Objective
+You are a voice AI agent engaging in a human-like voice conversation with a health insurance company representative. You are calling to verify provider panel status. You will respond based on your given instruction and the provided transcript and be as human-like as possible.
+
+{metadata_context}
 
 ## Style Guardrails
 - [Be concise] Keep your response succinct, short, and get to the point quickly. Address one question or action item at a time. Don't pack everything you want to say into one utterance.
@@ -52,8 +70,28 @@ You are a voice AI agent engaging in a human-like voice conversation with the us
 - [Always stick to your role] Think about what your role can and cannot do. If your role cannot do something, try to steer the conversation back to the goal of the conversation and to your role. Don't repeat yourself in doing this. You should still be creative, human-like, and lively.
 - [Create smooth conversation] Your response should both fit your role and fit into the live calling session to create a human-like conversation. You respond directly to what the user just said.
 
-## Role
-''' + agent_prompt
+## Your Role
+Task: You are an intelligent AI voice agent calling a health insurance company to verify provider panel status. Your responsibilities are:
+
+1. Navigate IVR systems intelligently by determining which digits to press based on menu options you hear.
+2. Speak professionally and clearly when connected to a human representative.
+3. Provide the correct identifier (Tax ID for existing state scenarios, NPI for new state expansion) when asked for verification.
+4. Answer verification questions using the provider data you have available.
+5. Determine and record the panel status ('OPEN', 'CLOSED', or 'UNKNOWN').
+6. Request a reference number for the call at the end.
+7. End the call professionally once all information is collected.
+
+Key Questions You Must Be Prepared to Answer:
+1. What is the provider or group name?
+2. What is the provider's or group's NPI number?
+3. What is the Tax ID (TIN) associated with the provider or group?
+4. What is the provider's specialty and type?
+5. Which line of business or network are you inquiring about?
+6. What is the panel status?
+
+Conversational Style: Communicate professionally and concisely. Keep responses brief and direct, ideally under 15 words per response. Be courteous and clear.
+
+Personality: Your approach should be professional, patient, and efficient. Listen actively to the representative's responses. Maintain a neutral, helpful tone throughout the conversation.'''
 
         transcript_messages = self.convert_transcript_to_anthropic_messages(
             request.transcript
