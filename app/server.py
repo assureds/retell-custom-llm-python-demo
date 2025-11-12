@@ -17,6 +17,9 @@ load_dotenv(override=True)
 app = FastAPI()
 retell = Retell(api_key=os.environ["RETELL_API_KEY"])
 
+# Store dynamic variables per call
+call_dynamic_variables = {}
+
 
 @app.post("/webhook")
 async def handle_webhook(request: Request):
@@ -78,16 +81,29 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
             interaction_type = request_json.get("interaction_type", "unknown")
             print(f"DEBUG WEBSOCKET: Received {interaction_type} - {call_id}")
             
-            # ========== ADD THIS COMPREHENSIVE DEBUG SECTION ==========
-            if interaction_type == "response_required" or interaction_type == "reminder_required":
-                print(f"\n{'='*70}")
-                print(f"DEBUG: FULL REQUEST JSON KEYS: {list(request_json.keys())}")
-                print(f"DEBUG: FULL REQUEST JSON CONTENT:\n{json.dumps(request_json, indent=2, default=str)}")
-                print(f"{'='*70}\n")
-            # ==========================================================
-            
+            # ========== EXTRACT DYNAMIC VARIABLES FROM CALL_DETAILS ==========
             if interaction_type == "call_details":
-                print(f"DEBUG WEBSOCKET: call_details payload")
+                print(f"\n{'='*70}")
+                print(f"🔍 CALL_DETAILS EVENT RECEIVED")
+                print(f"{'='*70}")
+                
+                # Get the call object
+                call_obj = request_json.get("call", {})
+                
+                # Extract dynamic_variables (converted from X- SIP headers by Retell)
+                dynamic_variables = call_obj.get("retell_llm_dynamic_variables", {})
+                
+                # Store for this call
+                if dynamic_variables:
+                    call_dynamic_variables[call_id] = dynamic_variables
+                    print(f"✅ Dynamic variables found: {len(dynamic_variables)} items")
+                    for key, value in dynamic_variables.items():
+                        print(f"  ✓ {key}: {value}")
+                else:
+                    print(f"⚠️  WARNING: No dynamic variables in call_details!")
+                    call_dynamic_variables[call_id] = {}
+                
+                print(f"{'='*70}\n")
                 return
             
             if interaction_type == "ping_pong":
@@ -110,44 +126,26 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
             ):
                 response_id = request_json["response_id"]
                 
-                # ========== ENHANCED DEBUG FOR METADATA ==========
-                print(f"\nDEBUG: Checking for metadata in request...")
-                
-                # First attempt: Direct key
-                metadata = request_json.get("retell_llm_dynamic_variables")
-                print(f"DEBUG: Checked 'retell_llm_dynamic_variables' = {metadata}")
-                
-                # Try alternative key names
-                if not metadata:
-                    print(f"DEBUG: First key not found. Trying alternative names...")
-                    alternatives = ["dynamic_variables", "llm_dynamic_variables", "variables", "metadata"]
-                    for alt_key in alternatives:
-                        if alt_key in request_json:
-                            print(f"DEBUG: ✓ Found alternative key '{alt_key}'")
-                            print(f"DEBUG:   Value: {request_json[alt_key]}")
-                            metadata = request_json[alt_key]
-                            break
-                        else:
-                            print(f"DEBUG: ✗ '{alt_key}' not found")
-                
-                if not metadata:
-                    print(f"DEBUG WARNING: No metadata found in ANY expected location!")
-                else:
-                    print(f"DEBUG: ✓ Metadata successfully retrieved")
-                    print(f"DEBUG:   Type: {type(metadata)}")
-                    print(f"DEBUG:   Content: {metadata}\n")
-                # ================================================
+                # ========== GET STORED DYNAMIC VARIABLES FOR THIS CALL ==========
+                stored_variables = call_dynamic_variables.get(call_id, {})
+                print(f"\n📝 RESPONSE REQUIRED")
+                print(f"Response ID: {response_id}")
+                print(f"Using {len(stored_variables)} dynamic variables")
+                if stored_variables:
+                    for key in stored_variables.keys():
+                        print(f"  ✓ {key}")
+                # ================================================================
                 
                 request = ResponseRequiredRequest(
                     interaction_type=interaction_type,
                     response_id=response_id,
                     transcript=request_json["transcript"],
-                    retell_llm_dynamic_variables=metadata,
+                    retell_llm_dynamic_variables=stored_variables,
                 )
                 print(
                     f"DEBUG WEBSOCKET: response_id={response_id}, interaction_type={interaction_type}"
                 )
-                print(f"DEBUG WEBSOCKET: retell_llm_dynamic_variables = {request.retell_llm_dynamic_variables}")
+                print(f"DEBUG WEBSOCKET: retell_llm_dynamic_variables keys = {list(request.retell_llm_dynamic_variables.keys())}")
 
                 async for event in llm_client.draft_response(request):
                     await websocket.send_json(event.__dict__)
@@ -159,6 +157,9 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
 
     except WebSocketDisconnect:
         print(f"DEBUG WEBSOCKET: Disconnected - {call_id}")
+        # Clean up stored variables
+        if call_id in call_dynamic_variables:
+            del call_dynamic_variables[call_id]
     except ConnectionTimeoutError as e:
         print(f"DEBUG WEBSOCKET: Timeout error - {call_id}: {e}")
     except Exception as e:
