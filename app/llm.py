@@ -11,30 +11,13 @@ begin_sentence = "Hi, I'm calling on behalf of a healthcare organization to chec
 
 class LlmClient:
     def __init__(self):
-        # Get API key directly from environment (Heroku native)
-        # Do NOT use dotenv - Heroku provides env vars natively
-        api_key = os.environ.get("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+        # TEMPORARY: Hardcode the API key directly for testing
+        api_key = "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"
         
-        # Debug: Print what we're getting
-        print(f"DEBUG INIT: Attempting to read ANTHROPIC_API_KEY")
-        print(f"DEBUG INIT: os.environ keys: {list(os.environ.keys())[:5]}...")  # Show first 5 keys
-        print(f"DEBUG INIT: api_key value: {api_key[:20] if api_key else 'NONE'}...")
+        print(f"✅ Using hardcoded API key: {api_key[:30]}...")
         
-        if not api_key or api_key.strip() == "":
-            print(f"ERROR: API key is empty or None")
-            print(f"DEBUG INIT: All ANTHROPIC keys in environ: {[k for k in os.environ.keys() if 'ANTHROPIC' in k or 'anthropic' in k]}")
-            raise ValueError(
-                f"ANTHROPIC_API_KEY not found. Environment has: {[k for k in os.environ.keys() if 'API' in k or 'KEY' in k]}"
-            )
-        
-        print(f"✅ SUCCESS: API Key initialized - {api_key[:30]}...") 
-        
-        try:
-            self.client = AsyncAnthropic(api_key=api_key)
-            print(f"✅ AsyncAnthropic client created successfully")
-        except Exception as e:
-            print(f"ERROR creating AsyncAnthropic client: {str(e)}")
-            raise
+        self.client = AsyncAnthropic(api_key=api_key)
+        print(f"✅ AsyncAnthropic client created successfully")
 
     def draft_begin_message(self):
         response = ResponseResponse(
@@ -88,7 +71,6 @@ class LlmClient:
         else:
             print("⚠️  DEBUG: NO dynamic variables received!")
 
-        # Anthropic uses a system parameter instead of a system role in messages
         system_prompt = f'''##Objective
 You are a voice AI agent engaging in a human-like voice conversation with a health insurance company representative. You are calling to verify provider panel status. You will respond based on your given instruction and the provided transcript and be as human-like as possible.
 
