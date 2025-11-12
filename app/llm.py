@@ -11,10 +11,10 @@ begin_sentence = "Hi, I'm calling on behalf of a healthcare organization to chec
 
 class LlmClient:
     def __init__(self):
-        # TEMPORARY: Hardcode the API key directly for testing
-        api_key = "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"
+        # Use the new valid API key
+        api_key = "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"
         
-        print(f"✅ Using hardcoded API key: {api_key[:30]}...")
+        print(f"✅ Using new API key: {api_key[:30]}...")
         
         self.client = AsyncAnthropic(api_key=api_key)
         print(f"✅ AsyncAnthropic client created successfully")
