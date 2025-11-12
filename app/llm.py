@@ -37,25 +37,35 @@ class LlmClient:
         # Build metadata context
         metadata_context = ""
         if request.retell_llm_dynamic_variables:
-            print(f"DEBUG: Full metadata received: {request.retell_llm_dynamic_variables}")  # ADD THIS
-            print(f"DEBUG: Metadata keys: {request.retell_llm_dynamic_variables.keys()}")  # ADD THIS
+            print(f"✅ DEBUG: Dynamic variables received: {len(request.retell_llm_dynamic_variables)} items")
+            print(f"DEBUG: Metadata keys: {request.retell_llm_dynamic_variables.keys()}")
             
             metadata_context = "\n## Available Provider Data:\n"
             variables = request.retell_llm_dynamic_variables
-            metadata_context += f"- Provider/Organization Name: {variables.get('provider_name', 'Not provided')}\n"
-            metadata_context += f"- NPI Number: {variables.get('npi_number', 'Not provided')}\n"
-            metadata_context += f"- Tax ID: {variables.get('tax_id', 'Not provided')}\n"
-            metadata_context += f"- Provider Specialty: {variables.get('specialty', 'Not provided')}\n"
-            metadata_context += f"- Line of Business: {variables.get('line_of_business', 'Not provided')}\n"
-            metadata_context += f"- Scenario Type: {variables.get('scenario_type', 'Not provided')}\n"
-            metadata_context += f"- Payer: {variables.get('payer', 'Not provided')}\n"
+            provider_name = variables.get('provider_name', 'Not provided')
+            npi_number = variables.get('npi_number', 'Not provided')
+            tax_id = variables.get('tax_id', 'Not provided')
+            specialty = variables.get('specialty', 'Not provided')
+            line_of_business = variables.get('line_of_business', 'Not provided')
+            scenario_type = variables.get('scenario_type', 'Not provided')
+            payer = variables.get('payer', 'Not provided')
+            organization_name = variables.get('organization_name', 'Not provided')
+            
+            metadata_context += f"- Organization/Provider Name: {provider_name}\n"
+            metadata_context += f"- NPI Number: {npi_number}\n"
+            metadata_context += f"- Tax ID: {tax_id}\n"
+            metadata_context += f"- Provider Specialty: {specialty}\n"
+            metadata_context += f"- Line of Business: {line_of_business}\n"
+            metadata_context += f"- Scenario Type: {scenario_type}\n"
+            metadata_context += f"- Payer: {payer}\n"
+            metadata_context += f"- Organization: {organization_name}\n"
             metadata_context += f"\n## Use Correct Identifier:\n"
-            if variables.get('scenario_type') == 'Existing State':
-                metadata_context += f"- This is an EXISTING STATE scenario. Use the TAX ID: {variables.get('tax_id')} when asked for verification.\n"
+            if scenario_type == 'Existing State':
+                metadata_context += f"- This is an EXISTING STATE scenario. Use the TAX ID: {tax_id} when asked for verification.\n"
             else:
-                metadata_context += f"- This is a NEW STATE EXPANSION scenario. Use the NPI: {variables.get('npi_number')} when asked for verification.\n"
+                metadata_context += f"- This is a NEW STATE EXPANSION scenario. Use the NPI: {npi_number} when asked for verification.\n"
         else:
-            print("DEBUG: NO metadata received!")  # ADD THIS
+            print("⚠️  DEBUG: NO dynamic variables received!")
 
         # Anthropic uses a system parameter instead of a system role in messages
         system_prompt = f'''##Objective
