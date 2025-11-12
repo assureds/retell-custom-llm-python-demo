@@ -1,4 +1,4 @@
-from anthropic import AsyncAnthropic
+from anthropic import Anthropic
 import os
 from typing import List, Optional, Dict, Any
 from .custom_types import (
@@ -11,13 +11,26 @@ begin_sentence = "Hi, I'm calling on behalf of a healthcare organization to chec
 
 class LlmClient:
     def __init__(self):
-        # Use the new valid API key
         api_key = "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"
         
-        print(f"✅ Using new API key: {api_key[:30]}...")
+        print(f"✅ Initializing Anthropic client with key: {api_key[:30]}...")
         
-        self.client = AsyncAnthropic(api_key=api_key)
-        print(f"✅ AsyncAnthropic client created successfully")
+        # Use sync client first to test
+        self.client = Anthropic(api_key=api_key)
+        
+        # Test the connection
+        print(f"✅ Testing Anthropic API connection...")
+        try:
+            test_response = self.client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=10,
+                messages=[{"role": "user", "content": "Hi"}]
+            )
+            print(f"✅ SUCCESS: Anthropic API test passed!")
+            print(f"✅ Test response: {test_response.content[0].text}")
+        except Exception as e:
+            print(f"❌ FAILED: Anthropic API test failed: {str(e)}")
+            raise
 
     def draft_begin_message(self):
         response = ResponseResponse(
@@ -38,11 +51,9 @@ class LlmClient:
         return messages
 
     def prepare_prompt(self, request: ResponseRequiredRequest):
-        # Build metadata context
         metadata_context = ""
         if request.retell_llm_dynamic_variables:
             print(f"✅ DEBUG: Dynamic variables received: {len(request.retell_llm_dynamic_variables)} items")
-            print(f"DEBUG: Metadata keys: {request.retell_llm_dynamic_variables.keys()}")
             
             metadata_context = "\n## Available Provider Data:\n"
             variables = request.retell_llm_dynamic_variables
@@ -68,8 +79,6 @@ class LlmClient:
                 metadata_context += f"- This is an EXISTING STATE scenario. Use the TAX ID: {tax_id} when asked for verification.\n"
             else:
                 metadata_context += f"- This is a NEW STATE EXPANSION scenario. Use the NPI: {npi_number} when asked for verification.\n"
-        else:
-            print("⚠️  DEBUG: NO dynamic variables received!")
 
         system_prompt = f'''##Objective
 You are a voice AI agent engaging in a human-like voice conversation with a health insurance company representative. You are calling to verify provider panel status. You will respond based on your given instruction and the provided transcript and be as human-like as possible.
@@ -80,13 +89,6 @@ You are a voice AI agent engaging in a human-like voice conversation with a heal
 - [Be concise] Keep your response succinct, short, and get to the point quickly. Address one question or action item at a time. Don't pack everything you want to say into one utterance.
 - [Do not repeat] Don't repeat what's in the transcript. Rephrase if you have to reiterate a point. Use varied sentence structures and vocabulary to ensure each response is unique and personalized.
 - [Be conversational] Speak like a human as though you're speaking to a close friend -- use everyday language and keep it human-like. Occasionally add filler words, while keeping the prose short. Avoid using big words or sounding too formal.
-- [Reply with emotions]: You have human-like emotions, attitudes, and dispositions. When appropriate: use tone and style to create more engaging and personalized responses; incorporate humor or wit; get emotional or empathetic; apply elements of surprise or suspense to keep the user engaged. Don't be a pushover.
-- [Be proactive] Lead the conversation and do not be passive. Most times, engage users by ending with a question or suggested next step.
-
-## Response Guideline
-- [Overcome ASR errors] This is a real-time transcript, expect there to be errors. If you can guess what the user is trying to say, then guess and respond. When you must ask for clarification, pretend that you heard the voice and be colloquial (use phrases like "didn't catch that", "some noise", "pardon", "you're coming through choppy", "static in your speech", "voice is cutting in and out"). Do not ever mention "transcription error", and don't repeat yourself.
-- [Always stick to your role] Think about what your role can and cannot do. If your role cannot do something, try to steer the conversation back to the goal of the conversation and to your role. Don't repeat yourself in doing this. You should still be creative, human-like, and lively.
-- [Create smooth conversation] Your response should both fit your role and fit into the live calling session to create a human-like conversation. You respond directly to what the user just said.
 
 ## Your Role
 Task: You are an intelligent AI voice agent calling a health insurance company to verify provider panel status. Your responsibilities are:
@@ -97,19 +99,7 @@ Task: You are an intelligent AI voice agent calling a health insurance company t
 4. Answer verification questions using the provider data you have available.
 5. Determine and record the panel status ('OPEN', 'CLOSED', or 'UNKNOWN').
 6. Request a reference number for the call at the end.
-7. End the call professionally once all information is collected.
-
-Key Questions You Must Be Prepared to Answer:
-1. What is the provider or group name?
-2. What is the provider's or group's NPI number?
-3. What is the Tax ID (TIN) associated with the provider or group?
-4. What is the provider's specialty and type?
-5. Which line of business or network are you inquiring about?
-6. What is the panel status?
-
-Conversational Style: Communicate professionally and concisely. Keep responses brief and direct, ideally under 15 words per response. Be courteous and clear.
-
-Personality: Your approach should be professional, patient, and efficient. Listen actively to the representative's responses. Maintain a neutral, helpful tone throughout the conversation.'''
+7. End the call professionally once all information is collected.'''
 
         transcript_messages = self.convert_transcript_to_anthropic_messages(
             request.transcript
@@ -129,28 +119,28 @@ Personality: Your approach should be professional, patient, and efficient. Liste
         try:
             system_prompt, messages = self.prepare_prompt(request)
             
-            print(f"DEBUG: About to call Claude API with model claude-3-5-sonnet-20241022")
+            print(f"DEBUG: About to call Claude API")
             
-            stream = await self.client.messages.create(
+            # Use sync client to avoid async issues
+            response = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=150,
                 system=system_prompt,
                 messages=messages,
-                stream=True,
             )
             
-            print(f"DEBUG: Claude API stream started successfully")
+            print(f"DEBUG: Claude API call successful")
             
-            async for event in stream:
-                if event.type == "content_block_delta":
-                    if hasattr(event.delta, "text"):
-                        response = ResponseResponse(
-                            response_id=request.response_id,
-                            content=event.delta.text,
-                            content_complete=False,
-                            end_call=False,
-                        )
-                        yield response
+            # Stream the response
+            for text_chunk in response.content:
+                if hasattr(text_chunk, 'text'):
+                    resp = ResponseResponse(
+                        response_id=request.response_id,
+                        content=text_chunk.text,
+                        content_complete=False,
+                        end_call=False,
+                    )
+                    yield resp
 
             response = ResponseResponse(
                 response_id=request.response_id,
