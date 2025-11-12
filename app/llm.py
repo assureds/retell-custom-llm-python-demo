@@ -11,18 +11,30 @@ begin_sentence = "Hi, I'm calling on behalf of a healthcare organization to chec
 
 class LlmClient:
     def __init__(self):
-        # FIX: Explicitly check and raise error if API key is missing
-        api_key = os.getenv("ANTHROPIC_API_KEY")
+        # Get API key directly from environment (Heroku native)
+        # Do NOT use dotenv - Heroku provides env vars natively
+        api_key = os.environ.get("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
         
-        if not api_key:
+        # Debug: Print what we're getting
+        print(f"DEBUG INIT: Attempting to read ANTHROPIC_API_KEY")
+        print(f"DEBUG INIT: os.environ keys: {list(os.environ.keys())[:5]}...")  # Show first 5 keys
+        print(f"DEBUG INIT: api_key value: {api_key[:20] if api_key else 'NONE'}...")
+        
+        if not api_key or api_key.strip() == "":
+            print(f"ERROR: API key is empty or None")
+            print(f"DEBUG INIT: All ANTHROPIC keys in environ: {[k for k in os.environ.keys() if 'ANTHROPIC' in k or 'anthropic' in k]}")
             raise ValueError(
-                "ANTHROPIC_API_KEY environment variable is not set. "
-                "Please set it in Heroku config vars and restart the app."
+                f"ANTHROPIC_API_KEY not found. Environment has: {[k for k in os.environ.keys() if 'API' in k or 'KEY' in k]}"
             )
         
-        print(f"✅ DEBUG: API Key initialized - {api_key[:20]}...") 
+        print(f"✅ SUCCESS: API Key initialized - {api_key[:30]}...") 
         
-        self.client = AsyncAnthropic(api_key=api_key)
+        try:
+            self.client = AsyncAnthropic(api_key=api_key)
+            print(f"✅ AsyncAnthropic client created successfully")
+        except Exception as e:
+            print(f"ERROR creating AsyncAnthropic client: {str(e)}")
+            raise
 
     def draft_begin_message(self):
         response = ResponseResponse(
@@ -138,7 +150,7 @@ Personality: Your approach should be professional, patient, and efficient. Liste
             print(f"DEBUG: About to call Claude API with model claude-3-5-sonnet-20241022")
             
             stream = await self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",  # Latest Claude model, optimal for real-time
+                model="claude-3-5-sonnet-20241022",
                 max_tokens=150,
                 system=system_prompt,
                 messages=messages,
@@ -158,7 +170,6 @@ Personality: Your approach should be professional, patient, and efficient. Liste
                         )
                         yield response
 
-            # Send final response with "content_complete" set to True to signal completion
             response = ResponseResponse(
                 response_id=request.response_id,
                 content="",
@@ -173,7 +184,6 @@ Personality: Your approach should be professional, patient, and efficient. Liste
             import traceback
             print(f"TRACEBACK: {traceback.format_exc()}")
             
-            # Send error response
             response = ResponseResponse(
                 response_id=request.response_id,
                 content="I apologize, I'm experiencing a technical issue. Could you please repeat that?",
