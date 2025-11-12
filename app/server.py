@@ -78,6 +78,14 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
             interaction_type = request_json.get("interaction_type", "unknown")
             print(f"DEBUG WEBSOCKET: Received {interaction_type} - {call_id}")
             
+            # ========== ADD THIS COMPREHENSIVE DEBUG SECTION ==========
+            if interaction_type == "response_required" or interaction_type == "reminder_required":
+                print(f"\n{'='*70}")
+                print(f"DEBUG: FULL REQUEST JSON KEYS: {list(request_json.keys())}")
+                print(f"DEBUG: FULL REQUEST JSON CONTENT:\n{json.dumps(request_json, indent=2, default=str)}")
+                print(f"{'='*70}\n")
+            # ==========================================================
+            
             if interaction_type == "call_details":
                 print(f"DEBUG WEBSOCKET: call_details payload")
                 return
@@ -101,10 +109,34 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
                 or interaction_type == "reminder_required"
             ):
                 response_id = request_json["response_id"]
+                
+                # ========== ENHANCED DEBUG FOR METADATA ==========
+                print(f"\nDEBUG: Checking for metadata in request...")
+                
+                # First attempt: Direct key
                 metadata = request_json.get("retell_llm_dynamic_variables")
-                print(f"DEBUG WEBSOCKET: Got metadata - {metadata}")
+                print(f"DEBUG: Checked 'retell_llm_dynamic_variables' = {metadata}")
+                
+                # Try alternative key names
                 if not metadata:
-                    print(f"DEBUG WEBSOCKET: WARNING - No metadata received!")
+                    print(f"DEBUG: First key not found. Trying alternative names...")
+                    alternatives = ["dynamic_variables", "llm_dynamic_variables", "variables", "metadata"]
+                    for alt_key in alternatives:
+                        if alt_key in request_json:
+                            print(f"DEBUG: ✓ Found alternative key '{alt_key}'")
+                            print(f"DEBUG:   Value: {request_json[alt_key]}")
+                            metadata = request_json[alt_key]
+                            break
+                        else:
+                            print(f"DEBUG: ✗ '{alt_key}' not found")
+                
+                if not metadata:
+                    print(f"DEBUG WARNING: No metadata found in ANY expected location!")
+                else:
+                    print(f"DEBUG: ✓ Metadata successfully retrieved")
+                    print(f"DEBUG:   Type: {type(metadata)}")
+                    print(f"DEBUG:   Content: {metadata}\n")
+                # ================================================
                 
                 request = ResponseRequiredRequest(
                     interaction_type=interaction_type,
