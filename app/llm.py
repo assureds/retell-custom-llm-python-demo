@@ -11,9 +11,18 @@ begin_sentence = "Hi, I'm calling on behalf of a healthcare organization to chec
 
 class LlmClient:
     def __init__(self):
-        self.client = AsyncAnthropic(
-            api_key=os.environ.get("ANTHROPIC_API_KEY"),
-        )
+        # FIX: Explicitly check and raise error if API key is missing
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        
+        if not api_key:
+            raise ValueError(
+                "ANTHROPIC_API_KEY environment variable is not set. "
+                "Please set it in Heroku config vars and restart the app."
+            )
+        
+        print(f"✅ DEBUG: API Key initialized - {api_key[:20]}...") 
+        
+        self.client = AsyncAnthropic(api_key=api_key)
 
     def draft_begin_message(self):
         response = ResponseResponse(
@@ -123,32 +132,52 @@ Personality: Your approach should be professional, patient, and efficient. Liste
         return system_prompt, transcript_messages
 
     async def draft_response(self, request: ResponseRequiredRequest):
-        system_prompt, messages = self.prepare_prompt(request)
-        
-        stream = await self.client.messages.create(
-            model="claude-3-5-sonnet-20241022",  # Latest Claude model, optimal for real-time
-            max_tokens=150,
-            system=system_prompt,
-            messages=messages,
-            stream=True,
-        )
-        
-        async for event in stream:
-            if event.type == "content_block_delta":
-                if hasattr(event.delta, "text"):
-                    response = ResponseResponse(
-                        response_id=request.response_id,
-                        content=event.delta.text,
-                        content_complete=False,
-                        end_call=False,
-                    )
-                    yield response
+        try:
+            system_prompt, messages = self.prepare_prompt(request)
+            
+            print(f"DEBUG: About to call Claude API with model claude-3-5-sonnet-20241022")
+            
+            stream = await self.client.messages.create(
+                model="claude-3-5-sonnet-20241022",  # Latest Claude model, optimal for real-time
+                max_tokens=150,
+                system=system_prompt,
+                messages=messages,
+                stream=True,
+            )
+            
+            print(f"DEBUG: Claude API stream started successfully")
+            
+            async for event in stream:
+                if event.type == "content_block_delta":
+                    if hasattr(event.delta, "text"):
+                        response = ResponseResponse(
+                            response_id=request.response_id,
+                            content=event.delta.text,
+                            content_complete=False,
+                            end_call=False,
+                        )
+                        yield response
 
-        # Send final response with "content_complete" set to True to signal completion
-        response = ResponseResponse(
-            response_id=request.response_id,
-            content="",
-            content_complete=True,
-            end_call=False,
-        )
-        yield response
+            # Send final response with "content_complete" set to True to signal completion
+            response = ResponseResponse(
+                response_id=request.response_id,
+                content="",
+                content_complete=True,
+                end_call=False,
+            )
+            yield response
+            
+        except Exception as e:
+            print(f"ERROR in draft_response: {str(e)}")
+            print(f"ERROR type: {type(e).__name__}")
+            import traceback
+            print(f"TRACEBACK: {traceback.format_exc()}")
+            
+            # Send error response
+            response = ResponseResponse(
+                response_id=request.response_id,
+                content="I apologize, I'm experiencing a technical issue. Could you please repeat that?",
+                content_complete=True,
+                end_call=False,
+            )
+            yield response
