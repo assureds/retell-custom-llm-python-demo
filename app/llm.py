@@ -11,21 +11,40 @@ begin_sentence = "Hi, I'm calling on behalf of a healthcare organization to chec
 
 class LlmClient:
     def __init__(self):
-        # Read API key ONLY from environment variable
+        # ========== FIX: Get API key from environment with detailed debugging ==========
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         
-        if not api_key:
-            print(f"ERROR: ANTHROPIC_API_KEY environment variable not set!")
-            print(f"Available env vars: {[k for k in os.environ.keys() if 'API' in k or 'KEY' in k]}")
-            raise ValueError("ANTHROPIC_API_KEY environment variable must be set in Heroku Config Vars")
+        # Debug info
+        print(f"\n{'='*70}")
+        print(f"🔍 LLM CLIENT INITIALIZATION")
+        print(f"{'='*70}")
+        print(f"DEBUG: Checking ANTHROPIC_API_KEY environment variable")
+        print(f"  Value exists: {bool(api_key)}")
+        print(f"  Value length: {len(api_key) if api_key else 0}")
+        if api_key:
+            print(f"  First 30 chars: {api_key[:30]}...")
+            print(f"  ✅ API Key found and accessible")
+        else:
+            print(f"  ❌ Value is NONE/EMPTY")
+        print(f"{'='*70}\n")
         
-        print(f"✅ API Key loaded from environment")
+        # Validate API key
+        if not api_key or api_key.strip() == "":
+            raise ValueError(
+                "ANTHROPIC_API_KEY environment variable is empty or not set. "
+                "Please add it to Heroku Config Vars (Settings → Reveal Config Vars) "
+                "and restart the dyno."
+            )
         
+        print(f"✅ API Key initialized successfully")
+        
+        # Initialize AsyncAnthropic client
         try:
             self.client = AsyncAnthropic(api_key=api_key)
-            print(f"✅ AsyncAnthropic client initialized successfully")
+            print(f"✅ AsyncAnthropic client created successfully\n")
         except Exception as e:
-            print(f"ERROR initializing AsyncAnthropic: {str(e)}")
+            print(f"❌ ERROR creating AsyncAnthropic client: {str(e)}")
+            print(f"This may indicate the API key is invalid or Anthropic API is unreachable")
             raise
 
     def draft_begin_message(self):
@@ -47,7 +66,7 @@ class LlmClient:
         return messages
 
     def prepare_prompt(self, request: ResponseRequiredRequest):
-        # Build metadata context
+        # Build metadata context from dynamic variables
         metadata_context = ""
         if request.retell_llm_dynamic_variables:
             print(f"✅ Dynamic variables received: {len(request.retell_llm_dynamic_variables)} items")
@@ -77,8 +96,9 @@ class LlmClient:
             else:
                 metadata_context += f"- This is a NEW STATE EXPANSION scenario. Use the NPI: {npi_number} when asked for verification.\n"
         else:
-            print("⚠️  No dynamic variables received")
+            print("⚠️  No dynamic variables received from call_details")
 
+        # System prompt for the LLM
         system_prompt = f'''##Objective
 You are a voice AI agent engaging in a human-like voice conversation with a health insurance company representative. You are calling to verify provider panel status. You will respond based on your given instruction and the provided transcript and be as human-like as possible.
 
@@ -137,7 +157,11 @@ Personality: Your approach should be professional, patient, and efficient. Liste
         try:
             system_prompt, messages = self.prepare_prompt(request)
             
-            print(f"DEBUG: Calling Claude API")
+            print(f"\n📞 CALLING CLAUDE API")
+            print(f"Model: claude-3-5-sonnet-20241022")
+            print(f"Max tokens: 150")
+            print(f"System prompt length: {len(system_prompt)} chars")
+            print(f"Messages: {len(messages)} turns")
             
             stream = await self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
@@ -147,7 +171,7 @@ Personality: Your approach should be professional, patient, and efficient. Liste
                 stream=True,
             )
             
-            print(f"DEBUG: Claude API stream started")
+            print(f"✅ Claude API stream started successfully\n")
             
             async for event in stream:
                 if event.type == "content_block_delta":
@@ -160,6 +184,7 @@ Personality: Your approach should be professional, patient, and efficient. Liste
                         )
                         yield response
 
+            # Send final response signaling completion
             response = ResponseResponse(
                 response_id=request.response_id,
                 content="",
@@ -169,10 +194,12 @@ Personality: Your approach should be professional, patient, and efficient. Liste
             yield response
             
         except Exception as e:
-            print(f"ERROR in draft_response: {str(e)}")
+            print(f"\n❌ ERROR in draft_response: {str(e)}")
+            print(f"Error type: {type(e).__name__}")
             import traceback
-            print(f"TRACEBACK: {traceback.format_exc()}")
+            print(f"Traceback:\n{traceback.format_exc()}")
             
+            # Send error fallback response
             response = ResponseResponse(
                 response_id=request.response_id,
                 content="I apologize, I'm experiencing a technical issue. Could you please repeat that?",
