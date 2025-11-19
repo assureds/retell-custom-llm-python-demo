@@ -13,7 +13,15 @@ from .custom_types import (
 )
 from .llm import LlmClient
 
-load_dotenv(override=True)
+# ========== FIX: Only load .env in development ==========
+# In Heroku production, env vars are set directly in Config Vars
+# We don't want load_dotenv(override=True) to overwrite them with empty .env values
+if os.path.exists('.env'):
+    print("DEBUG: Found .env file, loading environment variables...")
+    load_dotenv(override=True)
+else:
+    print("DEBUG: No .env file found (expected in Heroku production)")
+
 app = FastAPI()
 retell = Retell(api_key=os.environ["RETELL_API_KEY"])
 
