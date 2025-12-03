@@ -12,10 +12,8 @@ from .custom_types import (
     ResponseRequiredRequest,
 )
 from .llm import LlmClient
+from .redis_utils import redis_store
 
-# ========== FIX: Only load .env in development ==========
-# In Heroku production, env vars are set directly in Config Vars
-# We don't want load_dotenv(override=True) to overwrite them with empty .env values
 if os.path.exists('.env'):
     print("DEBUG: Found .env file, loading environment variables...")
     load_dotenv(override=True)
@@ -25,8 +23,67 @@ else:
 app = FastAPI()
 retell = Retell(api_key=os.environ["RETELL_API_KEY"])
 
-# Store dynamic variables per call
-call_dynamic_variables = {}
+call_phone_numbers = {}
+
+
+@app.post("/redis-store")
+async def redis_store_metadata(request: Request):
+    """Store provider metadata in Redis before making the call"""
+    try:
+        data = await request.json()
+        print(f"\n{'='*70}")
+        print(f"🔴 REDIS STORE ENDPOINT CALLED")
+        print(f"{'='*70}")
+        
+        phone_number = data.get("phone_number")
+        if not phone_number:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "phone_number is required"}
+            )
+        
+        metadata = {
+            "provider_name": data.get("provider_name", ""),
+            "npi_number": data.get("npi_number", ""),
+            "tax_id": data.get("tax_id", ""),
+            "specialty": data.get("specialty", ""),
+            "scenario_type": data.get("scenario_type", ""),
+            "line_of_business": data.get("line_of_business", ""),
+            "payer": data.get("payer", ""),
+            "organization_name": data.get("organization_name", ""),
+        }
+        
+        print(f"Phone number: {phone_number}")
+        print(f"Storing {len(metadata)} metadata fields:")
+        for key, value in metadata.items():
+            if value:
+                print(f"  ✓ {key}: {value}")
+        
+        success = redis_store.store_metadata(phone_number, metadata)
+        
+        if success:
+            print(f"{'='*70}\n")
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": True,
+                    "message": f"Metadata stored for {phone_number}",
+                    "fields_stored": len([v for v in metadata.values() if v])
+                }
+            )
+        else:
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Failed to store metadata"}
+            )
+    
+    except Exception as err:
+        print(f"❌ ERROR in redis_store_metadata: {err}")
+        print(f"TRACEBACK: {traceback.format_exc()}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(err)}
+        )
 
 
 @app.post("/webhook")
@@ -34,23 +91,23 @@ async def handle_webhook(request: Request):
     try:
         post_data = await request.json()
         print(f"DEBUG WEBHOOK: Received event: {post_data.get('event', 'unknown')}")
-        print(f"DEBUG WEBHOOK: Full payload keys: {post_data.keys()}")
-        
-        # Skip signature verification for now - debugging
-        print(f"DEBUG WEBHOOK: Accepting webhook without signature verification")
         
         event = post_data.get("event")
-        call_data = post_data.get("call", {})  # Changed from 'data' to 'call'
+        call_data = post_data.get("call", {})
         call_id = call_data.get("call_id", "unknown")
         
         if event == "call_started":
             print(f"DEBUG WEBHOOK: Call started - {call_id}")
         elif event == "call_ended":
             print(f"DEBUG WEBHOOK: Call ended - {call_id}")
+            if call_id in call_phone_numbers:
+                phone_info = call_phone_numbers[call_id]
+                to_number = phone_info.get("to") if isinstance(phone_info, dict) else phone_info
+                if to_number:
+                    redis_store.delete_metadata(to_number)
+                del call_phone_numbers[call_id]
         elif event == "call_analyzed":
             print(f"DEBUG WEBHOOK: Call analyzed - {call_id}")
-        else:
-            print(f"DEBUG WEBHOOK: Unknown event - {event}")
         
         return JSONResponse(status_code=200, content={"received": True})
     except Exception as err:
@@ -89,27 +146,37 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
             interaction_type = request_json.get("interaction_type", "unknown")
             print(f"DEBUG WEBSOCKET: Received {interaction_type} - {call_id}")
             
-            # ========== EXTRACT DYNAMIC VARIABLES FROM CALL_DETAILS ==========
             if interaction_type == "call_details":
                 print(f"\n{'='*70}")
                 print(f"🔍 CALL_DETAILS EVENT RECEIVED")
                 print(f"{'='*70}")
                 
-                # Get the call object
                 call_obj = request_json.get("call", {})
+                from_number = call_obj.get("from_number", None)
+                to_number = call_obj.get("to_number", None)
                 
-                # Extract dynamic_variables (converted from X- SIP headers by Retell)
-                dynamic_variables = call_obj.get("retell_llm_dynamic_variables", {})
+                print(f"From Number (Agent 1): {from_number}")
+                print(f"To Number (Your Phone): {to_number}")
                 
-                # Store for this call
+                if from_number:
+                    call_phone_numbers[call_id] = {"from": from_number, "to": to_number}
+                
+                dynamic_variables = {}
+                if to_number:
+                    print(f"\n🔴 REDIS LOOKUP: Attempting to retrieve metadata by phone number")
+                    redis_metadata = redis_store.retrieve_metadata(to_number)
+                    if redis_metadata:
+                        dynamic_variables = redis_metadata
+                        print(f"✅ Successfully retrieved {len(dynamic_variables)} fields from Redis")
+                    else:
+                        print(f"⚠️  No metadata found in Redis for {to_number}")
+                
                 if dynamic_variables:
-                    call_dynamic_variables[call_id] = dynamic_variables
-                    print(f"✅ Dynamic variables found: {len(dynamic_variables)} items")
                     for key, value in dynamic_variables.items():
-                        print(f"  ✓ {key}: {value}")
+                        if key and value:
+                            print(f"  ✓ {key}: {value}")
                 else:
-                    print(f"⚠️  WARNING: No dynamic variables in call_details!")
-                    call_dynamic_variables[call_id] = {}
+                    print(f"⚠️  No dynamic variables available for this call")
                 
                 print(f"{'='*70}\n")
                 return
@@ -134,15 +201,24 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
             ):
                 response_id = request_json["response_id"]
                 
-                # ========== GET STORED DYNAMIC VARIABLES FOR THIS CALL ==========
-                stored_variables = call_dynamic_variables.get(call_id, {})
+                stored_variables = {}
+                
+                if call_id in call_phone_numbers:
+                    phone_info = call_phone_numbers[call_id]
+                    to_number = phone_info.get("to") if isinstance(phone_info, dict) else phone_info
+                    if to_number:
+                        stored_variables = redis_store.retrieve_metadata(to_number) or {}
+                
+                if not stored_variables and "retell_llm_dynamic_variables" in request_json:
+                    stored_variables = request_json.get("retell_llm_dynamic_variables", {})
+                
                 print(f"\n📝 RESPONSE REQUIRED")
                 print(f"Response ID: {response_id}")
                 print(f"Using {len(stored_variables)} dynamic variables")
                 if stored_variables:
                     for key in stored_variables.keys():
-                        print(f"  ✓ {key}")
-                # ================================================================
+                        if key and stored_variables[key]:
+                            print(f"  ✓ {key}")
                 
                 request = ResponseRequiredRequest(
                     interaction_type=interaction_type,
@@ -165,9 +241,6 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
 
     except WebSocketDisconnect:
         print(f"DEBUG WEBSOCKET: Disconnected - {call_id}")
-        # Clean up stored variables
-        if call_id in call_dynamic_variables:
-            del call_dynamic_variables[call_id]
     except ConnectionTimeoutError as e:
         print(f"DEBUG WEBSOCKET: Timeout error - {call_id}: {e}")
     except Exception as e:
